@@ -17,28 +17,28 @@ MODEL_PRICES = {
 }
 
 
-class SessionCreate(BaseModel):
+class SessionCreate(BaseModel): #struct for a mock session
     user_id: str
     session_name: str
     provider: str
     model: str
 
 
-class ChatRequest(BaseModel):
+class ChatRequest(BaseModel): #struct for a mock chatrequest
     session_id: str
     prompt: str
 
 
-@app.get("/")
+@app.get("/") #home page (diagnose if working)
 def home():
     return {"message": "Tokeep backend is running"}
 
 
-@app.post("/sessions")
+@app.post("/sessions") #post sessions - this is where new sessions are added into backend thru api call
 def create_session(session: SessionCreate):
     session_id = str(uuid4())
 
-    new_session = {
+    new_session = { #new session created
         "session_id": session_id,
         "user_id": session.user_id,
         "session_name": session.session_name,
@@ -52,7 +52,7 @@ def create_session(session: SessionCreate):
         "total_cost": 0
     }
 
-    sessions[session_id] = new_session
+    sessions[session_id] = new_session #keying every unique session to hashmap - key is session id
     return new_session
 
 
