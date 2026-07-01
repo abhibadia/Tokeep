@@ -1,14 +1,53 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlmodel import SQLModel, Field, Session, create_engine, select
 from datetime import datetime
 from uuid import uuid4
+from typing import Optional
 
 app = FastAPI()
 
-# Temporary in-memory database
-sessions = {}
+DATABASE_URL = "sqlite:///tokeep.db"
+engine = create_engine(DATABASE_URL, echo=True)
 
-# Fake pricing for now
+
+class ChatSession(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    user_id: str
+    session_name: str
+    provider: str
+    model: str
+    start_time: str
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    total_cost: float = 0
+
+
+class Message(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    session_id: str
+    prompt: str
+    response: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost: float
+    timestamp: str
+
+
+class SessionCreate(BaseModel):
+    user_id: str
+    session_name: str
+    provider: str
+    model: str
+
+
+class ChatRequest(BaseModel):
+    session_id: str
+    prompt: str
+
+
 MODEL_PRICES = {
     "gpt-4.1-mini": {
         "input": 0.0000004,
@@ -17,139 +56,143 @@ MODEL_PRICES = {
 }
 
 
-class SessionCreate(BaseModel): #struct for a mock session
-    user_id: str
-    session_name: str
-    provider: str
-    model: str
+@app.on_event("startup")
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
 
 
-class ChatRequest(BaseModel): #struct for a mock chatrequest
-    session_id: str
-    prompt: str
-
-
-@app.get("/") #home page (diagnose if working)
+@app.get("/")
 def home():
     return {"message": "Tokeep backend is running"}
 
 
-@app.post("/sessions") #post sessions - this is where new sessions are added into backend thru api call
-def create_session(session: SessionCreate):
-    session_id = str(uuid4())
+@app.post("/sessions")
+def create_session(session_data: SessionCreate):
+    new_session = ChatSession(
+        user_id=session_data.user_id,
+        session_name=session_data.session_name,
+        provider=session_data.provider,
+        model=session_data.model,
+        start_time=datetime.now().isoformat()
+    )
 
-    new_session = { #new session created
-        "session_id": session_id,
-        "user_id": session.user_id,
-        "session_name": session.session_name,
-        "provider": session.provider,
-        "model": session.model,
-        "start_time": datetime.now().isoformat(),
-        "messages": [],
-        "total_input_tokens": 0,
-        "total_output_tokens": 0,
-        "total_tokens": 0,
-        "total_cost": 0
-    }
+    with Session(engine) as db:
+        db.add(new_session)
+        db.commit()
+        db.refresh(new_session)
 
-    sessions[session_id] = new_session #keying every unique session to hashmap - key is session id
     return new_session
 
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    if request.session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+    with Session(engine) as db:
+        chat_session = db.get(ChatSession, request.session_id)
 
-    session = sessions[request.session_id]
+        if not chat_session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    # Fake LLM response for now
-    response_text = f"Fake LLM response to: {request.prompt}"
+        response_text = f"Fake LLM response to: {request.prompt}"
 
-    # Simple fake token counting
-    input_tokens = len(request.prompt.split())
-    output_tokens = len(response_text.split())
-    total_tokens = input_tokens + output_tokens
+        input_tokens = len(request.prompt.split())
+        output_tokens = len(response_text.split())
+        total_tokens = input_tokens + output_tokens
 
-    cost = calculate_cost(
-        model=session["model"],
-        input_tokens=input_tokens,
-        output_tokens=output_tokens
-    )
+        cost = calculate_cost(
+            model=chat_session.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens
+        )
 
-    message = {
-        "prompt": request.prompt,
-        "response": response_text,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-        "cost": cost,
-        "timestamp": datetime.now().isoformat()
-    }
+        message = Message(
+            session_id=request.session_id,
+            prompt=request.prompt,
+            response=response_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cost=cost,
+            timestamp=datetime.now().isoformat()
+        )
 
-    session["messages"].append(message)
-    session["total_input_tokens"] += input_tokens
-    session["total_output_tokens"] += output_tokens
-    session["total_tokens"] += total_tokens
-    session["total_cost"] += cost
+        chat_session.total_input_tokens += input_tokens
+        chat_session.total_output_tokens += output_tokens
+        chat_session.total_tokens += total_tokens
+        chat_session.total_cost += cost
 
-    return message
+        db.add(message)
+        db.add(chat_session)
+        db.commit()
+        db.refresh(message)
+
+        return message
 
 
 @app.get("/sessions")
 def get_sessions():
-    return list(sessions.values())
+    with Session(engine) as db:
+        statement = select(ChatSession)
+        results = db.exec(statement).all()
+        return results
 
 
 @app.get("/sessions/{session_id}")
 def get_session_details(session_id: str):
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+    with Session(engine) as db:
+        chat_session = db.get(ChatSession, session_id)
 
-    return sessions[session_id]
+        if not chat_session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        statement = select(Message).where(Message.session_id == session_id)
+        messages = db.exec(statement).all()
+
+        return {
+            "session": chat_session,
+            "messages": messages
+        }
 
 
 @app.get("/usage")
 def get_usage_summary():
-    total_sessions = len(sessions)
-    total_input_tokens = 0
-    total_output_tokens = 0
-    total_tokens = 0
-    total_cost = 0
+    with Session(engine) as db:
+        statement = select(ChatSession)
+        sessions = db.exec(statement).all()
 
-    for session in sessions.values():
-        total_input_tokens += session["total_input_tokens"]
-        total_output_tokens += session["total_output_tokens"]
-        total_tokens += session["total_tokens"]
-        total_cost += session["total_cost"]
-
-    return {
-        "total_sessions": total_sessions,
-        "total_input_tokens": total_input_tokens,
-        "total_output_tokens": total_output_tokens,
-        "total_tokens": total_tokens,
-        "total_cost": total_cost
-    }
+        return {
+            "total_sessions": len(sessions),
+            "total_input_tokens": sum(s.total_input_tokens for s in sessions),
+            "total_output_tokens": sum(s.total_output_tokens for s in sessions),
+            "total_tokens": sum(s.total_tokens for s in sessions),
+            "total_cost": sum(s.total_cost for s in sessions)
+        }
 
 
 @app.delete("/sessions/{session_id}")
 def delete_session(session_id: str):
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+    with Session(engine) as db:
+        chat_session = db.get(ChatSession, session_id)
 
-    deleted_session = sessions.pop(session_id)
+        if not chat_session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    return {
-        "message": "Session deleted",
-        "deleted_session": deleted_session
-    }
+        statement = select(Message).where(Message.session_id == session_id)
+        messages = db.exec(statement).all()
+
+        for message in messages:
+            db.delete(message)
+
+        db.delete(chat_session)
+        db.commit()
+
+        return {"message": "Session deleted"}
 
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int):
     if model not in MODEL_PRICES:
         return 0
 
-    input_price = MODEL_PRICES[model]["input"]
-    output_price = MODEL_PRICES[model]["output"]
-
-    return input_tokens * input_price + output_tokens * output_price
+    return (
+        input_tokens * MODEL_PRICES[model]["input"]
+        + output_tokens * MODEL_PRICES[model]["output"]
+    )
