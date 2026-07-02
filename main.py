@@ -4,8 +4,17 @@ from sqlmodel import SQLModel, Field, Session, create_engine, select
 from datetime import datetime
 from uuid import uuid4
 from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 DATABASE_URL = "sqlite:///tokeep.db"
 engine = create_engine(DATABASE_URL, echo=True)
