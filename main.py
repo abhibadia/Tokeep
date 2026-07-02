@@ -5,6 +5,15 @@ from datetime import datetime
 from uuid import uuid4
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import os
+from openai import OpenAI
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
 
 app = FastAPI()
 
@@ -101,11 +110,16 @@ def chat(request: ChatRequest):
         if not chat_session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        response_text = f"Fake LLM response to: {request.prompt}"
+        response = client.responses.create(
+            model=chat_session.model,
+            input=request.prompt
+        )
 
-        input_tokens = len(request.prompt.split())
-        output_tokens = len(response_text.split())
-        total_tokens = input_tokens + output_tokens
+        response_text = response.output_text
+
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+        total_tokens = response.usage.total_tokens
 
         cost = calculate_cost(
             model=chat_session.model,
