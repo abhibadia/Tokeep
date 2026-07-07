@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 from openai import OpenAI
+from openai import OpenAI, AuthenticationError, RateLimitError, APIError
 
 load_dotenv()
 
@@ -154,16 +155,25 @@ def chat(request: ChatRequest):
         if not chat_session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        response = user_client.responses.create(
-            model=chat_session.model,
-            input=request.prompt
-        )
+        try:
+            response = user_client.responses.create(
+                model=chat_session.model,
+                input=request.prompt
+            )
 
-        response_text = response.output_text
+            response_text = response.output_text
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            total_tokens = response.usage.total_tokens
 
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
-        total_tokens = response.usage.total_tokens
+        except AuthenticationError:
+            raise HTTPException(status_code=401, detail="Invalid OpenAI API key")
+
+        except RateLimitError:
+            raise HTTPException(status_code=429, detail="OpenAI quota exceeded or rate limited")
+
+        except APIError:
+            raise HTTPException(status_code=500, detail="OpenAI API error")
 
         cost = calculate_cost(
             model=chat_session.model,

@@ -50,6 +50,12 @@ export default function Home() {
     });
 
     const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.detail || "Something went wrong");
+      return;
+    }
+
     setMessages((prev) => [...prev, data]);
     setPrompt("");
   }
