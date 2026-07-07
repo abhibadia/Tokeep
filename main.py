@@ -53,6 +53,18 @@ class Message(SQLModel, table=True):
     cost: float
     timestamp: str
 
+class UserAPIKey(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    user_id: str
+    provider: str
+    api_key: str
+    created_at: str
+
+class APIKeyCreate(BaseModel):
+    user_id: str
+    provider: str
+    api_key: str
+
 
 class SessionCreate(BaseModel):
     user_id: str
@@ -101,16 +113,48 @@ def create_session(session_data: SessionCreate):
 
     return new_session
 
+@app.post("/api-keys")
+def save_api_key(key_data: APIKeyCreate):
+    new_key = UserAPIKey(
+        user_id=key_data.user_id,
+        provider=key_data.provider,
+        api_key=key_data.api_key,
+        created_at=datetime.now().isoformat()
+    )
+
+    with Session(engine) as db:
+        db.add(new_key)
+        db.commit()
+        db.refresh(new_key)
+
+    return {
+        "message": "API key saved",
+        "provider": new_key.provider,
+        "key_id": new_key.id
+    }
+
 
 @app.post("/chat")
 def chat(request: ChatRequest):
     with Session(engine) as db:
         chat_session = db.get(ChatSession, request.session_id)
 
+        statement = select(UserAPIKey).where(
+            UserAPIKey.user_id == chat_session.user_id,
+            UserAPIKey.provider == chat_session.provider
+        )
+
+        user_api_key = db.exec(statement).first()
+
+        if not user_api_key:
+            raise HTTPException(status_code=400, detail="No API key connected for this provider")
+
+        user_client = OpenAI(api_key=user_api_key.api_key)
+
         if not chat_session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        response = client.responses.create(
+        response = user_client.responses.create(
             model=chat_session.model,
             input=request.prompt
         )

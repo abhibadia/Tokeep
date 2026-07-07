@@ -10,6 +10,9 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<any[]>([]);
 
+  const [apiKey, setApiKey] = useState("");
+  const [keyStatus, setKeyStatus] = useState("");
+
   async function createSession() {
     const res = await fetch("http://127.0.0.1:8000/sessions", {
       method: "POST",
@@ -50,6 +53,23 @@ export default function Home() {
     setMessages((prev) => [...prev, data]);
     setPrompt("");
   }
+  async function saveApiKey() {
+    const res = await fetch("http://127.0.0.1:8000/api-keys", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: user?.id,
+        provider: "openai",
+        api_key: apiKey,
+      }),
+    });
+
+    const data = await res.json();
+    setKeyStatus(data.message);
+    setApiKey("");
+  }
 
   return (
     <main style={{ padding: "24px", maxWidth: "800px" }}>
@@ -64,6 +84,21 @@ export default function Home() {
 
         <h1>Tokeep Dashboard</h1>
         <p>You are logged in.</p>
+        <h2>Connect OpenAI</h2>
+
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="Paste your OpenAI API key"
+          style={{ width: "100%", padding: "8px" }}
+        />
+
+        <button onClick={saveApiKey} style={{ marginTop: "8px" }}>
+          Save API Key
+        </button>
+
+        {keyStatus && <p>{keyStatus}</p>}
 
         <button onClick={createSession}>Create Session</button>
 
