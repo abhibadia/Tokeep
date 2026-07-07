@@ -10,8 +10,17 @@ import os
 from openai import OpenAI
 from openai import OpenAI, AuthenticationError, RateLimitError, APIError
 from cryptography.fernet import Fernet
+from fastapi import Request, Depends
+from clerk_backend_api import Clerk
 
 load_dotenv()
+
+CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
+
+if not CLERK_SECRET_KEY:
+    raise ValueError("CLERK_SECRET_KEY is missing from .env")
+
+clerk = Clerk(bearer_auth=CLERK_SECRET_KEY)
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
@@ -78,13 +87,11 @@ class UserAPIKey(SQLModel, table=True):
     created_at: str
 
 class APIKeyCreate(BaseModel):
-    user_id: str
     provider: str
     api_key: str
 
 
 class SessionCreate(BaseModel):
-    user_id: str
     session_name: str
     provider: str
     model: str
@@ -131,9 +138,9 @@ def create_session(session_data: SessionCreate):
     return new_session
 
 @app.post("/api-keys")
-def save_api_key(key_data: APIKeyCreate):
+def save_api_key(key_data: APIKeyCreate, user_id: str = Depends(get_current_user_id)):
     new_key = UserAPIKey(
-        user_id=key_data.user_id,
+        user_id=user_id,
         provider=key_data.provider,
         api_key=encrypt_api_key(key_data.api_key),
         created_at=datetime.now().isoformat()
@@ -290,3 +297,17 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int):
         input_tokens * MODEL_PRICES[model]["input"]
         + output_tokens * MODEL_PRICES[model]["output"]
     )
+
+def get_current_user_id(request: Request):
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    token = auth_header.replace("Bearer ", "")
+
+    try:
+        session_claims = clerk.authenticate_request(request)
+        return session_claims.sub
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired Clerk token")

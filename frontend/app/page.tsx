@@ -1,6 +1,6 @@
 "use client";
 
-import { Show, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
+import { Show, SignInButton, SignUpButton, UserButton, useUser, useAuth } from "@clerk/nextjs";
 import { useState } from "react";
 
 export default function Home() {
@@ -13,11 +13,15 @@ export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [keyStatus, setKeyStatus] = useState("");
 
+  const { getToken } = useAuth();
+
   async function createSession() {
+    const token = await getToken();
     const res = await fetch("http://127.0.0.1:8000/sessions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({
         user_id: user?.id,
@@ -33,6 +37,7 @@ export default function Home() {
   }
 
   async function sendPrompt() {
+    const token = await getToken();
     if (!session) {
       alert("Create a session first");
       return;
@@ -42,6 +47,7 @@ export default function Home() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({
         session_id: session.id,
@@ -60,13 +66,14 @@ export default function Home() {
     setPrompt("");
   }
   async function saveApiKey() {
+    const token = await getToken();
     const res = await fetch("http://127.0.0.1:8000/api-keys", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({
-        user_id: user?.id,
         provider: "openai",
         api_key: apiKey,
       }),
