@@ -1,2 +1,4 @@
 .env
 .env
+tokeep.db
+__pycache__/
