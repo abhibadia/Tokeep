@@ -9,8 +9,24 @@ from dotenv import load_dotenv
 import os
 from openai import OpenAI
 from openai import OpenAI, AuthenticationError, RateLimitError, APIError
+from cryptography.fernet import Fernet
 
 load_dotenv()
+
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+
+if not ENCRYPTION_KEY:
+    raise ValueError("ENCRYPTION_KEY is missing from .env")
+
+fernet = Fernet(ENCRYPTION_KEY.encode())
+
+
+def encrypt_api_key(api_key: str) -> str:
+    return fernet.encrypt(api_key.encode()).decode()
+
+
+def decrypt_api_key(encrypted_key: str) -> str:
+    return fernet.decrypt(encrypted_key.encode()).decode()
 
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY")
@@ -119,7 +135,7 @@ def save_api_key(key_data: APIKeyCreate):
     new_key = UserAPIKey(
         user_id=key_data.user_id,
         provider=key_data.provider,
-        api_key=key_data.api_key,
+        api_key=encrypt_api_key(key_data.api_key),
         created_at=datetime.now().isoformat()
     )
 
@@ -150,7 +166,8 @@ def chat(request: ChatRequest):
         if not user_api_key:
             raise HTTPException(status_code=400, detail="No API key connected for this provider")
 
-        user_client = OpenAI(api_key=user_api_key.api_key)
+        decrypted_key = decrypt_api_key(user_api_key.api_key)
+        user_client = OpenAI(api_key=decrypted_key)
 
         if not chat_session:
             raise HTTPException(status_code=404, detail="Session not found")
