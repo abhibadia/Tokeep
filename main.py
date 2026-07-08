@@ -54,6 +54,19 @@ app.add_middleware(
 DATABASE_URL = "sqlite:///tokeep.db"
 engine = create_engine(DATABASE_URL, echo=True)
 
+def get_current_user_id(request: Request):
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    token = auth_header.replace("Bearer ", "")
+
+    try:
+        session_claims = clerk.authenticate_request(request)
+        return session_claims.sub
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired Clerk token")
 
 class ChatSession(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
@@ -121,9 +134,9 @@ def home():
 
 
 @app.post("/sessions")
-def create_session(session_data: SessionCreate):
+def create_session(session_data: SessionCreate, user_id: str = Depends(get_current_user_id)):
     new_session = ChatSession(
-        user_id=session_data.user_id,
+        user_id=user_id,
         session_name=session_data.session_name,
         provider=session_data.provider,
         model=session_data.model,
@@ -297,17 +310,3 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int):
         input_tokens * MODEL_PRICES[model]["input"]
         + output_tokens * MODEL_PRICES[model]["output"]
     )
-
-def get_current_user_id(request: Request):
-    auth_header = request.headers.get("Authorization")
-
-    if not auth_header:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    token = auth_header.replace("Bearer ", "")
-
-    try:
-        session_claims = clerk.authenticate_request(request)
-        return session_claims.sub
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired Clerk token")

@@ -24,7 +24,6 @@ export default function Home() {
         "Authorization": `Bearer ${token}`,
       },
       body: JSON.stringify({
-        user_id: user?.id,
         session_name: "My First Real Session",
         provider: "openai",
         model: "gpt-4.1-mini",
