@@ -114,6 +114,12 @@ class ChatRequest(BaseModel):
     session_id: str
     prompt: str
 
+class GatewayChatRequest(BaseModel):
+    provider: str
+    model: str
+    prompt: str
+    project_name: str = "default"
+
 
 MODEL_PRICES = {
     "gpt-4.1-mini": {
@@ -310,3 +316,63 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int):
         input_tokens * MODEL_PRICES[model]["input"]
         + output_tokens * MODEL_PRICES[model]["output"]
     )
+
+@app.post("/gateway/chat")
+def gateway_chat(
+    request: GatewayChatRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    with Session(engine) as db:
+        statement = select(UserAPIKey).where(
+            UserAPIKey.user_id == user_id,
+            UserAPIKey.provider == request.provider
+        )
+
+        user_api_key = db.exec(statement).first()
+
+        if not user_api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="No API key connected for this provider"
+            )
+
+        decrypted_key = decrypt_api_key(user_api_key.api_key)
+        user_client = OpenAI(api_key=decrypted_key)
+
+        try:
+            response = user_client.responses.create(
+                model=request.model,
+                input=request.prompt
+            )
+
+            response_text = response.output_text
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            total_tokens = response.usage.total_tokens
+
+        except AuthenticationError:
+            raise HTTPException(status_code=401, detail="Invalid OpenAI API key")
+
+        except RateLimitError:
+            raise HTTPException(status_code=429, detail="OpenAI quota exceeded or rate limited")
+
+        except APIError:
+            raise HTTPException(status_code=500, detail="OpenAI API error")
+
+        cost = calculate_cost(
+            model=request.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens
+        )
+
+        return {
+            "provider": request.provider,
+            "model": request.model,
+            "project_name": request.project_name,
+            "prompt": request.prompt,
+            "response": response_text,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "cost": cost
+        }
