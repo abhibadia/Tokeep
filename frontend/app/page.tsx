@@ -15,6 +15,9 @@ export default function Home() {
 
   const { getToken } = useAuth();
 
+  const [gatewayPrompt, setGatewayPrompt] = useState("");
+  const [gatewayResult, setGatewayResult] = useState<any>(null);
+
   async function createSession() {
     const token = await getToken();
     const res = await fetch("http://127.0.0.1:8000/sessions", {
@@ -63,6 +66,34 @@ export default function Home() {
 
     setMessages((prev) => [...prev, data]);
     setPrompt("");
+  }
+
+  async function testGateway() {
+    const token = await getToken();
+
+    const res = await fetch("http://127.0.0.1:8000/gateway/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        prompt: gatewayPrompt,
+        project_name: "test-app",
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.detail || "Gateway request failed");
+      return;
+    }
+
+    setGatewayResult(data);
+    setGatewayPrompt("");
   }
   async function saveApiKey() {
     const token = await getToken();
@@ -153,6 +184,33 @@ export default function Home() {
           </div>
         ))}
       </Show>
+      <hr />
+
+      <h2>Test AI Gateway</h2>
+
+      <textarea
+        value={gatewayPrompt}
+        onChange={(e) => setGatewayPrompt(e.target.value)}
+        placeholder="Enter a prompt to send through the gateway"
+        rows={4}
+        style={{ width: "100%" }}
+      />
+
+      <button onClick={testGateway} style={{ marginTop: "8px" }}>
+        Send Through Gateway
+      </button>
+
+      {gatewayResult && (
+        <div style={{ marginTop: "16px" }}>
+          <p><b>Response:</b> {gatewayResult.response}</p>
+          <p><b>Provider:</b> {gatewayResult.provider}</p>
+          <p><b>Model:</b> {gatewayResult.model}</p>
+          <p><b>Input tokens:</b> {gatewayResult.input_tokens}</p>
+          <p><b>Output tokens:</b> {gatewayResult.output_tokens}</p>
+          <p><b>Total tokens:</b> {gatewayResult.total_tokens}</p>
+          <p><b>Cost:</b> ${gatewayResult.cost}</p>
+        </div>
+      )}
     </main>
   );
 }
