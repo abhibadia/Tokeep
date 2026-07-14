@@ -54,7 +54,62 @@ app.add_middleware(
 DATABASE_URL = "sqlite:///tokeep.db"
 engine = create_engine(DATABASE_URL, echo=True)
 
-def get_current_user_id(request: Request):
+from fastapi import Request, HTTPException
+from clerk_backend_api import Clerk, AuthenticateRequestOptions
+
+
+def get_current_user_id(request: Request) -> str:
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Authorization header"
+        )
+
+    try:
+        request_state = clerk.authenticate_request(
+            request,
+            AuthenticateRequestOptions(
+                authorized_parties=[
+                    "http://localhost:3000",
+                    "http://127.0.0.1:3000",
+                ]
+            )
+        )
+
+        if not request_state.is_signed_in:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Clerk rejected token: {request_state.reason}"
+            )
+
+        if not request_state.payload:
+            raise HTTPException(
+                status_code=401,
+                detail="Clerk token contains no payload"
+            )
+
+        user_id = request_state.payload.get("sub")
+
+        if not user_id:
+            raise HTTPException(
+                status_code=401,
+                detail="Clerk token contains no user ID"
+            )
+
+        return user_id
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        print("Clerk authentication error:", repr(error))
+
+        raise HTTPException(
+            status_code=401,
+            detail=f"Clerk authentication failed: {str(error)}"
+        )
     auth_header = request.headers.get("Authorization")
 
     if not auth_header:
@@ -337,7 +392,7 @@ def gateway_chat(
             )
 
         decrypted_key = decrypt_api_key(user_api_key.api_key)
-        user_client = OpenAI(api_key=decrypted_key)
+        user_client = OpenAI(api_key=decrypted_key,max_retries=0)
 
         try:
             response = user_client.responses.create(
@@ -353,8 +408,19 @@ def gateway_chat(
         except AuthenticationError:
             raise HTTPException(status_code=401, detail="Invalid OpenAI API key")
 
-        except RateLimitError:
-            raise HTTPException(status_code=429, detail="OpenAI quota exceeded or rate limited")
+        except RateLimitError as error:
+            error_text = str(error)
+
+            if "insufficient_quota" in error_text:
+                raise HTTPException(
+                    status_code=429,
+                    detail="This OpenAI API key has no available API credits."
+                )
+
+            raise HTTPException(
+                status_code=429,
+                detail="This OpenAI API key has reached its rate limit. Try again shortly."
+            )
 
         except APIError:
             raise HTTPException(status_code=500, detail="OpenAI API error")
