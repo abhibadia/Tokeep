@@ -175,6 +175,20 @@ class GatewayChatRequest(BaseModel):
     prompt: str
     project_name: str = "default"
 
+class GatewayUsage(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    user_id: str
+    provider: str
+    model: str
+    project_name: str
+    prompt: str
+    response: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost: float
+    created_at: str
+
 
 MODEL_PRICES = {
     "gpt-4.1-mini": {
@@ -430,6 +444,23 @@ def gateway_chat(
             input_tokens=input_tokens,
             output_tokens=output_tokens
         )
+        usage_record = GatewayUsage(
+            user_id=user_id,
+            provider=request.provider,
+            model=request.model,
+            project_name=request.project_name,
+            prompt=request.prompt,
+            response=response_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cost=cost,
+            created_at=datetime.now().isoformat()
+        )
+
+        db.add(usage_record)
+        db.commit()
+        db.refresh(usage_record)
 
         return {
             "provider": request.provider,
@@ -441,4 +472,36 @@ def gateway_chat(
             "output_tokens": output_tokens,
             "total_tokens": total_tokens,
             "cost": cost
+        }
+
+@app.get("/gateway/usage")
+def get_gateway_usage(
+    user_id: str = Depends(get_current_user_id)
+):
+    with Session(engine) as db:
+        statement = (
+            select(GatewayUsage)
+            .where(GatewayUsage.user_id == user_id)
+            .order_by(GatewayUsage.created_at.desc())
+        )
+
+        return db.exec(statement).all()
+
+@app.get("/gateway/summary")
+def get_gateway_summary(
+    user_id: str = Depends(get_current_user_id)
+):
+    with Session(engine) as db:
+        statement = select(GatewayUsage).where(
+            GatewayUsage.user_id == user_id
+        )
+
+        records = db.exec(statement).all()
+
+        return {
+            "total_requests": len(records),
+            "total_input_tokens": sum(r.input_tokens for r in records),
+            "total_output_tokens": sum(r.output_tokens for r in records),
+            "total_tokens": sum(r.total_tokens for r in records),
+            "total_cost": sum(r.cost for r in records),
         }
